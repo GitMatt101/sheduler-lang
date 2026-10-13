@@ -6,12 +6,17 @@ package it.unibo.spe.mdd.sheduler.validation;
 
 import it.unibo.spe.mdd.sheduler.TimeUtils;
 import it.unibo.spe.mdd.sheduler.sheduler.*;
+
+import org.eclipse.emf.ecore.EStructuralFeature;
 import org.eclipse.xtext.validation.Check;
 import org.eclipse.xtext.validation.CheckType;
 
+import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * This class contains custom validation rules.
@@ -46,82 +51,118 @@ public class ShedulerValidator extends AbstractShedulerValidator {
 
     @Check
     public void checkRelativeTimeIsRepresentable(RelativeTime relativeTime) {
-        // TODO Ex 1.1a: convert relativeTime into a java.time.Duration via TimeUtils.toDuration
-        // TODO Ex 1.1b: the runtime will need it in milliseconds: also call .toMillis() on it
-        // TODO Ex 1.1c: if any of the two throws ArithmeticException (overflow), report a warning on
-        //               ShedulerPackage.Literals.RELATIVE_TIME__TIME_SPANS, whose message contains "not representable"
-        //               (try it with `in 2147483647 years`)
+        try {
+            TimeUtils.toDuration(relativeTime).toMillis();
+        } catch (final ArithmeticException e) {
+            warning("not representable", relativeTime, ShedulerPackage.Literals.RELATIVE_TIME__TIME_SPANS);
+        }
     }
 
     @Check
     public void checkAbsoluteTimeIsRepresentable(AbsoluteTime absoluteTime) {
-        // TODO Ex 1.2a: convert absoluteTime into a java.time.LocalDateTime via TimeUtils.toLocalDateTime
-        // TODO Ex 1.2b: beware, LocalDateTime.of throws java.time.DateTimeException (NOT ArithmeticException)
-        //               for invalid dates (e.g. 2030/02/31) or out-of-range years: catch it
-        // TODO Ex 1.2c: the runtime turns it into a delay from now: Duration.between(LocalDateTime.now(), ...).toMillis()
-        //               may overflow too (ArithmeticException)
-        // TODO Ex 1.2d: in all such cases, report a warning on ShedulerPackage.Literals.ABSOLUTE_TIME__DATE,
-        //               whose message contains "not representable"
+        try {
+            final LocalDateTime localAbsolute = TimeUtils.toLocalDateTime(absoluteTime);
+            Duration.between(LocalDateTime.now(), localAbsolute).toMillis();
+        } catch (final DateTimeException|ArithmeticException e) {
+            warning("not representable", absoluteTime, ShedulerPackage.Literals.ABSOLUTE_TIME__DATE);
+        }
     }
 
     @Check
     public void checkAbsoluteTimeIsInTheFuture(AbsoluteTime absoluteTime) {
-        // TODO Ex 1.3a: convert absoluteTime via TimeUtils.toLocalDateTime, and simply return on DateTimeException
-        //               (invalid dates are already reported by other rules)
-        // TODO Ex 1.3b: if it is NOT after LocalDateTime.now() (i.e. past or present), report a warning
-        //               on ShedulerPackage.Literals.ABSOLUTE_TIME__TIME, whose message contains "future"
+        try {
+            final LocalDateTime localAbsolute = TimeUtils.toLocalDateTime(absoluteTime);
+            final long duration = Duration.between(LocalDateTime.now(), localAbsolute).toMillis();
+            if (duration <= 0) {
+                warning("future", absoluteTime, ShedulerPackage.Literals.ABSOLUTE_TIME__TIME);
+            }
+        } catch (final DateTimeException e) {
+            return;
+        }
     }
 
     @Check(CheckType.FAST)
     public void ensureClockTimeIsValid(ClockTime clockTime) {
-        // NOTE: INT cannot be negative in the grammar, so you only need upper bounds
-        // TODO Ex 1.4a: error on CLOCK_TIME__HOUR if hour > 23 (message starting with "Hour")
-        // TODO Ex 1.4b: error on CLOCK_TIME__MINUTE if minute > 59
-        // TODO Ex 1.4c: error on CLOCK_TIME__SECOND if second > 59
-        // TODO Ex 1.4d: error on CLOCK_TIME__MILLISECOND if millisecond > 999
-        // TODO Ex 1.4e: error on CLOCK_TIME__NANOSECOND if nanosecond > 999
+        if (clockTime.getHour() > 23) {
+            error("Hour cannot be greater than 23", clockTime, ShedulerPackage.Literals.CLOCK_TIME__HOUR);
+        }
+        if (clockTime.getMinute() > 59) {
+            error("Minute cannot be greater than 59", clockTime, ShedulerPackage.Literals.CLOCK_TIME__MINUTE);
+        }
+        if (clockTime.getSecond() > 59) {
+            error("Second cannot be greater than 59", clockTime, ShedulerPackage.Literals.CLOCK_TIME__SECOND);
+        }
+        if (clockTime.getMillisecond() > 999) {
+            error("Millisecond cannot be greater than 999", clockTime, ShedulerPackage.Literals.CLOCK_TIME__MILLISECOND);
+        }
+        if (clockTime.getNanosecond() > 999) {
+            error("Nanosecond cannot be greater than 999", clockTime, ShedulerPackage.Literals.CLOCK_TIME__NANOSECOND);
+        }
     }
 
     @Check(CheckType.FAST)
     public void ensureTimeSpanIsValid(TimeSpan timeSpan) {
-        // TODO Ex 1.5: error on TIME_SPAN__DURATION if the duration is zero or negative
-        //              (message containing "strictly positive")
-        //              NOTE: do not add upper bounds, `repeat every 48 hours` is perfectly fine
+        if (timeSpan.getDuration() <= 0) {
+            error("strictly positive", timeSpan, ShedulerPackage.Literals.TIME_SPAN__DURATION);
+        }
     }
 
     @Check(CheckType.FAST)
     public void ensureTaskNamesAreUniqueWithinPool(TaskPool pool) {
-        // TODO Ex 1.6a: iterate over pool.getTasks(), skipping anonymous ones (getName() == null)
-        // TODO Ex 1.6b: keep the names seen so far in a Set<String> (hint: Set.add returns false for duplicates)
-        // TODO Ex 1.6c: error on the duplicate task, feature TASK__NAME, message "Repeated task ID: <name>"
+        final Set<String> tasks = new HashSet<>();
+        for (final Task task : pool.getTasks()) {
+            if (task.getName() != null && !tasks.add(task.getName())) {
+                error("Repeated task ID: " + task.getName(), task, ShedulerPackage.Literals.TASK__NAME);
+            }
+        }
     }
 
     @Check(CheckType.FAST)
     public void ensurePoolNamesAreUniqueWithinPool(TaskPoolSet pools) {
-        // TODO Ex 1.7: same as Ex 1.6, but for pools (feature TASK_POOL__NAME, message "Repeated pool ID: <name>")
+        final Set<String> poolNames = new HashSet<>();
+        for (final TaskPool pool : pools.getPools()) {
+            if (pool.getName() != null && !poolNames.add(pool.getName())) {
+                error("Repeated pool ID: " + pool.getName(), pool, ShedulerPackage.Literals.TASK_POOL__NAME);
+            }
+        }
     }
 
     @Check(CheckType.FAST)
     public void ensureDependentTasksAreNotPeriodic(Task task) {
-        // TODO Ex 1.8: error on TASK__PERIOD if the task is scheduled before/after another task
-        //              (getBefore() or getAfter() not null) AND it has a period (message containing "cannot be periodic")
+        if ((task.getBefore() != null || task.getAfter() != null) && task.getPeriod() != null) {
+            error("cannot be periodic", task, ShedulerPackage.Literals.TASK__PERIOD);
+        }
     }
 
     @Check
     public void ensurePeriodIsAtLeastOneMillisecond(Task task) {
-        // TODO Ex 1.9 (bonus): the runtime works in milliseconds, so `repeat every 500 ns` becomes a period of 0 ms,
-        //                      which ScheduledExecutorService rejects at run time with an IllegalArgumentException:
-        //                      error on TASK__PERIOD if the period is < 1 ms (message containing "at least 1 millisecond")
-        //                      Beware of ArithmeticException (already reported by Ex 1.1)
+        try {
+            if (TimeUtils.toDuration(task.getPeriod()).toMillis() < 1) {
+                error("at least 1 millisecond", task, ShedulerPackage.Literals.TASK__PERIOD);
+            }
+        } catch (Exception e) {
+            return;
+        }
     }
 
     @Check
     public void ensureNoDependencyCycles(Task task) {
-        // TODO Ex 5.17: `a after b` + `b after a` means neither task ever runs
-        // TODO Ex 5.17a: each task has at most one anchor (its getBefore() or getAfter())
-        // TODO Ex 5.17b: starting from task, follow anchors until reaching a timed task (anchor == null)...
-        // TODO Ex 5.17c: ...or until you meet a task you already visited (a cycle!)
-        // TODO Ex 5.17d: report an error on TASK__BEFORE or TASK__AFTER (message containing "Cyclic"),
-        //                           but only if `task` itself is part of the cycle
+        checkCycle(task, Task::getBefore, ShedulerPackage.Literals.TASK__BEFORE);
+        checkCycle(task, Task::getAfter, ShedulerPackage.Literals.TASK__AFTER);
+    }
+
+    private void checkCycle(final Task task, final Function<Task, Task> extractor, final EStructuralFeature literal) {
+        final Set<Task> visited = new HashSet<>();
+        visited.add(task);
+        Task dependency = extractor.apply(task);
+        do {
+            if (dependency != null) {
+                visited.add(dependency);
+                dependency = extractor.apply(dependency);
+            }
+        } while (dependency != null && !visited.contains(dependency));
+        if (dependency == task) {
+            error("Cyclic", task, literal);
+        }
     }
 }
